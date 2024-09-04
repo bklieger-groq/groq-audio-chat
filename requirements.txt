@@ -4,3 +4,4 @@ jinja2
 python-multipart
 requests
 groq
+elevenlabs

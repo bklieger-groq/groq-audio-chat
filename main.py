@@ -3,15 +3,12 @@ from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, Response
 import os
-import requests
 from groq import Groq
-import io
 import asyncio
 import json
 import httpx
-from elevenlabs import VoiceSettings
-from elevenlabs.client import ElevenLabs
 import time
+from uuid import uuid4
 
 app = FastAPI()
 
@@ -29,9 +26,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # Initialize conversation history
-conversation = [
-    {"role": "system", "content": "You are an AI travel agent who will prepare a full travel itinerary for the human. It should include places to see, places to dine, and a full schedule. Ask clarifying questions before creating it. BE CONCISE UNLESS YOU ARE PROVIDING THE ITINERARY. ONLY 1-3 SENTENCES MAX."}
-]
+default_system_prompt = "You are an AI travel agent tasked with preparing a comprehensive travel itinerary for the human. Your itinerary should include places to see, dining recommendations, and a detailed schedule. Before creating the itinerary, ask clarifying questions to understand the traveler's preferences. Be concise in your responses, except when providing the actual itinerary. Limit your responses to 1-3 sentences unless you're detailing the itinerary."
+
+# Store conversations for each session
+conversations = {}
 
 @app.get("/")
 async def root(request: Request):
@@ -51,15 +49,28 @@ async def transcribe_audio(file: UploadFile = File(...)):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    while True:
-        data = await websocket.receive_text()
-        message = json.loads(data)
-        
-        if message["type"] == "user_message":
-            conversation.append({"role": "user", "content": message["content"]})
-            ai_response = await get_ai_response(conversation)
-            conversation.append({"role": "assistant", "content": ai_response})
-            await websocket.send_text(json.dumps({"type": "ai_response", "content": ai_response}))
+    session_id = str(uuid4())
+    conversations[session_id] = [
+        {"role": "system", "content": default_system_prompt}
+    ]
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message["type"] == "user_message":
+                conversations[session_id].append({"role": "user", "content": message["content"]})
+                ai_response = await get_ai_response(conversations[session_id])
+                conversations[session_id].append({"role": "assistant", "content": ai_response})
+                await websocket.send_text(json.dumps({"type": "ai_response", "content": ai_response}))
+            elif message["type"] == "update_system_prompt":
+                # Update the system prompt for this session
+                conversations[session_id][0] = {"role": "system", "content": message["content"]}
+                await websocket.send_text(json.dumps({"type": "system_prompt_updated"}))
+    finally:
+        # Clean up the conversation when the WebSocket connection closes
+        del conversations[session_id]
 
 async def get_ai_response(conversation):
     max_retries = 3
