@@ -3,37 +3,91 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🎙️ Audio Chat App</title>
+    <title>🎙️ Groq Audio Chat</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/recordrtc/RecordRTC.min.js"></script>
+    <!-- Add Montserrat font import -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        highlight: '#F55036',
+                    },
+                    fontFamily: {
+                        'sans': ['Montserrat', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Montserrat', sans-serif;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
-    <div class="container mx-auto p-6 bg-white rounded-lg shadow-lg max-w-2xl">
-        <h1 class="text-3xl font-bold mb-6 text-center">🎙️ Audio Chat App</h1>
+    <div class="container mx-auto p-6 bg-white shadow-lg max-w-2xl">
+        <h1 class="text-3xl mb-6 text-center">Groq Audio Chat</h1>
         
         <div class="flex justify-center mb-6">
-            <button id="toggleRecording" class="bg-blue-500 text-white px-6 py-3 rounded-full hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition duration-300 ease-in-out transform hover:scale-105">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <button id="toggleRecording" class="text-highlight px-6 py-3 hover:text-opacity-80 focus:outline-none focus:ring-2 focus:ring-highlight transition duration-300 ease-in-out transform hover:scale-105">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
-                Start Recording
             </button>
         </div>
         
         <div id="status" class="text-center mb-4 text-gray-600 italic"></div>
         
-        <div id="aiResponse" class="mb-6 p-4 bg-green-100 rounded-lg shadow min-h-[100px]"></div>
+        <div id="ttsLoading" class="mb-4 flex justify-center items-center hidden">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-highlight"></div>
+        </div>
         
-        <div id="conversationHistory" class="space-y-2 max-h-[300px] overflow-y-auto"></div>
+        <div id="aiResponse" class="mb-6 p-4 bg-highlight bg-opacity-10 shadow min-h-[100px]"></div>
+        
+        <div class="flex justify-center mt-4">
+            <img src="/static/powered-by-groq.svg" alt="Powered by Groq" class="h-8">
+        </div>
     </div>
 
     <script>
         let recorder;
         let isRecording = false;
-        const socket = new WebSocket(`ws://${window.location.host}/ws`);
+        let socket;
         const toggleButton = document.getElementById('toggleRecording');
         const statusDiv = document.getElementById('status');
         const aiResponseDiv = document.getElementById('aiResponse');
+        const ttsLoadingDiv = document.getElementById('ttsLoading');
+        
+        function connectWebSocket() {
+            socket = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            socket.onopen = function() {
+                console.log('WebSocket connected');
+            };
+            
+            socket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'ai_response') {
+                    // Immediately show the Groq response
+                    aiResponseDiv.textContent = message.content;
+                    // Show loading animation for TTS
+                    ttsLoadingDiv.classList.remove('hidden');
+                    playAudioResponse(message.content);
+                    statusDiv.textContent = '';
+                }
+            };
+            
+            socket.onclose = function() {
+                console.log('WebSocket disconnected. Reconnecting...');
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        
+        connectWebSocket();
         
         toggleButton.addEventListener('click', toggleRecording);
         
@@ -52,14 +106,13 @@
                     recorder.startRecording();
                     isRecording = true;
                     toggleButton.innerHTML = `
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a7 7 0 11-18 0 9 9 0 0118 0z" />
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
                         </svg>
-                        Stop Recording
                     `;
-                    toggleButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-                    toggleButton.classList.add('bg-red-500', 'hover:bg-red-600');
+                    toggleButton.classList.remove('text-highlight', 'hover:text-opacity-80');
+                    toggleButton.classList.add('text-highlight', 'hover:text-opacity-80');
                     statusDiv.textContent = 'Recording...';
                 });
         }
@@ -70,13 +123,12 @@
                 sendAudioToServer(blob);
                 isRecording = false;
                 toggleButton.innerHTML = `
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                     </svg>
-                    Start Recording
                 `;
-                toggleButton.classList.remove('bg-red-500', 'hover:bg-red-600');
-                toggleButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                toggleButton.classList.remove('text-highlight', 'hover:text-opacity-80');
+                toggleButton.classList.add('text-highlight', 'hover:text-opacity-80');
                 statusDiv.textContent = 'Processing...';
             });
         }
@@ -88,41 +140,54 @@
             fetch('/transcribe', { method: 'POST', body: formData })
                 .then(response => response.json())
                 .then(data => {
-                    updateConversationHistory('You', data.transcription);
-                    socket.send(JSON.stringify({type: 'user_message', content: data.transcription}));
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({type: 'user_message', content: data.transcription}));
+                    } else {
+                        console.error('WebSocket is not open. Reconnecting...');
+                        connectWebSocket();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusDiv.textContent = 'Error processing audio. Please try again.';
                 });
         }
         
-        socket.onmessage = function(event) {
-            const message = JSON.parse(event.data);
-            if (message.type === 'ai_response') {
-                aiResponseDiv.textContent = message.content;
-                updateConversationHistory('AI', message.content);
-                playAudioResponse(message.content);
-                statusDiv.textContent = '';
-            }
-        };
-        
+        let audioQueue = [];
+        let isPlaying = false;
+
         function playAudioResponse(text) {
             const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
             fetch(`/text-to-speech?text=${encodeURIComponent(text)}`)
                 .then(response => response.arrayBuffer())
                 .then(arrayBuffer => audioContext.decodeAudioData(arrayBuffer))
                 .then(audioBuffer => {
-                    const source = audioContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(audioContext.destination);
-                    source.start(0);
+                    audioQueue.push(audioBuffer);
+                    if (!isPlaying) {
+                        playNextInQueue();
+                    }
                 });
         }
-        
-        function updateConversationHistory(role, content) {
-            const historyDiv = document.getElementById('conversationHistory');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = 'p-2 rounded ' + (role === 'You' ? 'bg-blue-100' : 'bg-green-100');
-            messageDiv.textContent = `${role}: ${content}`;
-            historyDiv.insertBefore(messageDiv, historyDiv.firstChild);
+
+        function playNextInQueue() {
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                // Hide loading animation when all audio is finished
+                ttsLoadingDiv.classList.add('hidden');
+                return;
+            }
+
+            isPlaying = true;
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createBufferSource();
+            source.buffer = audioQueue.shift();
+            source.connect(audioContext.destination);
+            source.start(0);
+            source.onended = playNextInQueue;
         }
+
+        // Remove the updateConversationHistory function as it's no longer needed
     </script>
 </body>
 </html>

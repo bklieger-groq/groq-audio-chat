@@ -1,13 +1,17 @@
 from fastapi import FastAPI, Request, UploadFile, File, WebSocket
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 import os
 import requests
 from groq import Groq
 import io
 import asyncio
 import json
+import httpx
+from elevenlabs import VoiceSettings
+from elevenlabs.client import ElevenLabs
+import time
 
 app = FastAPI()
 
@@ -58,30 +62,54 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.send_text(json.dumps({"type": "ai_response", "content": ai_response}))
 
 async def get_ai_response(conversation):
-    chat_completion = groq_client.chat.completions.create(
-        messages=conversation,
-        model="llama3-8b-8192",
-    )
-    return chat_completion.choices[0].message.content
+    max_retries = 3
+    retry_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            chat_completion = groq_client.chat.completions.create(
+                messages=conversation,
+                model="llama3-8b-8192",
+            )
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Error getting AI response (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print(f"Failed to get AI response after {max_retries} attempts: {e}")
+                raise
 
 @app.get("/text-to-speech")
 async def text_to_speech(text: str):
-    tts_url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}/stream"
-    headers = {
-        "Accept": "audio/mpeg",
-        "xi-api-key": XI_API_KEY,
-        "Content-Type": "application/json"
-    }
-    data = {
-        "text": text,
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.8
+    async def generate():
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}/stream"
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": XI_API_KEY
         }
-    }
-    response = requests.post(tts_url, json=data, headers=headers, stream=True)
-    if response.ok:
-        return StreamingResponse(response.iter_content(chunk_size=4096), media_type="audio/mpeg")
-    else:
-        return {"error": f"Error generating audio: {response.text}"}
+        data = {
+            "text": text,
+            "model":"eleven_turbo_v2",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.8
+            }
+        }
+
+        async with httpx.AsyncClient() as client:
+            async with client.stream("POST", url, json=data, headers=headers) as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+
+    async def test_gen():
+        for i in range(10):
+            yield str(i).encode()
+            print("i: ", i)
+            await asyncio.sleep(1)
+
+    # return StreamingResponse(test_gen(), media_type="audio/mpeg")
+
+    return StreamingResponse(generate(), media_type="audio/mpeg")
