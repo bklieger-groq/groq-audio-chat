@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Audio Chat App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/recordrtc/RecordRTC.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="container mx-auto p-6 bg-white rounded-lg shadow-lg max-w-2xl">
+        <h1 class="text-3xl font-bold mb-6 text-center">🎙️ Audio Chat App</h1>
+        
+        <div class="flex justify-center mb-6">
+            <button id="toggleRecording" class="bg-blue-500 text-white px-6 py-3 rounded-full hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-300 transition duration-300 ease-in-out transform hover:scale-105">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                Start Recording
+            </button>
+        </div>
+        
+        <div id="status" class="text-center mb-4 text-gray-600 italic"></div>
+        
+        <div id="aiResponse" class="mb-6 p-4 bg-green-100 rounded-lg shadow min-h-[100px]"></div>
+        
+        <div id="conversationHistory" class="space-y-2 max-h-[300px] overflow-y-auto"></div>
+    </div>
+
+    <script>
+        let recorder;
+        let isRecording = false;
+        const socket = new WebSocket(`ws://${window.location.host}/ws`);
+        const toggleButton = document.getElementById('toggleRecording');
+        const statusDiv = document.getElementById('status');
+        const aiResponseDiv = document.getElementById('aiResponse');
+        
+        toggleButton.addEventListener('click', toggleRecording);
+        
+        function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+        
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    recorder = new RecordRTC(stream, { type: 'audio' });
+                    recorder.startRecording();
+                    isRecording = true;
+                    toggleButton.innerHTML = `
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        Stop Recording
+                    `;
+                    toggleButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                    toggleButton.classList.add('bg-red-500', 'hover:bg-red-600');
+                    statusDiv.textContent = 'Recording...';
+                });
+        }
+        
+        function stopRecording() {
+            recorder.stopRecording(() => {
+                let blob = recorder.getBlob();
+                sendAudioToServer(blob);
+                isRecording = false;
+                toggleButton.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 inline-block mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    Start Recording
+                `;
+                toggleButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+                toggleButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                statusDiv.textContent = 'Processing...';
+            });
+        }
+        
+        function sendAudioToServer(blob) {
+            let formData = new FormData();
+            formData.append('file', blob, 'audio.wav');
+            
+            fetch('/transcribe', { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    updateConversationHistory('You', data.transcription);
+                    socket.send(JSON.stringify({type: 'user_message', content: data.transcription}));
+                });
+        }
+        
+        socket.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            if (message.type === 'ai_response') {
+                aiResponseDiv.textContent = message.content;
+                updateConversationHistory('AI', message.content);
+                playAudioResponse(message.content);
+                statusDiv.textContent = '';
+            }
+        };
+        
+        function playAudioResponse(text) {
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            fetch(`/text-to-speech?text=${encodeURIComponent(text)}`)
+                .then(response => response.arrayBuffer())
+                .then(arrayBuffer => audioContext.decodeAudioData(arrayBuffer))
+                .then(audioBuffer => {
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+                    source.start(0);
+                });
+        }
+        
+        function updateConversationHistory(role, content) {
+            const historyDiv = document.getElementById('conversationHistory');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'p-2 rounded ' + (role === 'You' ? 'bg-blue-100' : 'bg-green-100');
+            messageDiv.textContent = `${role}: ${content}`;
+            historyDiv.insertBefore(messageDiv, historyDiv.firstChild);
+        }
+    </script>
+</body>
+</html>
