@@ -119,7 +119,8 @@
         });
 
         function connectWebSocket() {
-            socket = new WebSocket(`wss://${window.location.host}/ws`);
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
             
             socket.onopen = function() {
                 console.log('WebSocket connected');
@@ -142,8 +143,12 @@
             };
             
             socket.onclose = function() {
-                console.log('WebSocket disconnected. Reconnecting...');
-                setTimeout(connectWebSocket, 3000);
+                console.log('WebSocket disconnected. Attempting to reconnect...');
+                setTimeout(connectWebSocket, 3000);  // Try to reconnect after 3 seconds
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
             };
         }
         
