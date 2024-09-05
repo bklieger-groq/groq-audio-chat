@@ -115,12 +115,4 @@ async def text_to_speech(text: str):
                 async for chunk in response.aiter_bytes():
                     yield chunk
 
-    async def test_gen():
-        for i in range(10):
-            yield str(i).encode()
-            print("i: ", i)
-            await asyncio.sleep(1)
-
-    # return StreamingResponse(test_gen(), media_type="audio/mpeg")
-
     return StreamingResponse(generate(), media_type="audio/mpeg")
